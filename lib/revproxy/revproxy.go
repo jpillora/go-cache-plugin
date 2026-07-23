@@ -354,7 +354,7 @@ type cacheControl struct {
 }
 
 func parseCacheControl(s string) (out cacheControl) {
-	for _, v := range strings.Split(s, ",") {
+	for v := range strings.SplitSeq(s, ",") {
 		key, val, ok := strings.Cut(strings.TrimSpace(v), "=")
 		if ok && key == "max-age" {
 			sec, err := strconv.Atoi(val)

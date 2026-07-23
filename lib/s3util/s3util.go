@@ -18,7 +18,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/creachadair/mds/value"
 )
 
 // IsNotExist reports whether err is an error indicating the requested resource
@@ -89,11 +88,11 @@ func (c *Client) Put(ctx context.Context, key string, data io.Reader) error {
 	var sizePtr *int64
 	switch t := data.(type) {
 	case sizer:
-		sizePtr = value.Ptr(t.Size())
+		sizePtr = new(t.Size())
 	case statter:
 		fi, err := t.Stat()
 		if err == nil {
-			sizePtr = value.Ptr(fi.Size())
+			sizePtr = new(fi.Size())
 		}
 	case io.Seeker:
 		v, err := t.Seek(0, io.SeekEnd)

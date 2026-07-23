@@ -115,7 +115,7 @@ func parseCacheObject(data []byte) ([]byte, http.Header, error) {
 		return nil, nil, errors.New("invalid cache object: missing header")
 	}
 	h := make(http.Header)
-	for _, line := range strings.Split(string(hdr), "\n") {
+	for line := range strings.SplitSeq(string(hdr), "\n") {
 		name, value, ok := strings.Cut(line, ": ")
 		if ok {
 			h.Add(name, value)
