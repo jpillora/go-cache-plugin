@@ -12,7 +12,7 @@ import (
 
 	"github.com/creachadair/command"
 	"github.com/creachadair/flax"
-	"github.com/tailscale/go-cache-plugin/lib/s3util"
+	"github.com/jpillora/go-cache-plugin/lib/s3util"
 )
 
 func main() {
@@ -42,20 +42,23 @@ the --cache-dir flag or GOCACHE_DIR environment.`,
 		Commands: []*command.C{
 			{
 				Name:  "serve",
-				Usage: "--plugin <port>",
+				Usage: "--plugin <port|host:port>",
 				Help: `Run a cache server.
 
 In this mode, the cache server listens for connections on a socket instead of
 serving directly over stdin/stdout. The "connect" command adapts the direct
 interface to this one.
 
-By default, only the build cache is exported via the --plugin port.
+The --plugin address accepts a port (localhost) or an explicit host:port.
+Use --plugin=0.0.0.0:5930 to listen on all IPv4 interfaces.
 
 If --http is set, the server also exports an HTTP server at that address.
-By default, this exports only /debug endpoints, including metrics.
+This exports /debug endpoints, including metrics, and an HTTP build-cache API
+under /cache/. Remote clients use "connect http://<host>:<port>" to download
+artifacts locally; no shared filesystem or S3 credentials are needed on clients.
 When --http is enabled, the following options are available:
 
-- When --modcache is true, the server also exports a caching module proxy at
+- When --modproxy is true, the server also exports a caching module proxy at
   http://<host>:<port>/mod/.
 
 - When --revproxy is set, the server also hosts a caching reverse proxy for the
@@ -67,11 +70,14 @@ When --http is enabled, the following options are available:
 			},
 			{
 				Name:  "connect",
-				Usage: "<port>",
+				Usage: "<port|http(s)://server>",
 				Help: `Connect to a remote cache server.
 
-This mode bridges stdin/stdout to a cache server (see the "serve" command)
-listening on the specified port.`,
+For a local port, this bridges stdin/stdout to the server's TCP listener.
+For an HTTP or HTTPS URL, this downloads artifacts to a client-local cache before
+returning file paths to Go. This requires no shared filesystem or S3 credentials.
+The client cache defaults to the OS cache directory under go-cache-plugin-client;
+override it with --cache-dir or GOCACHE_DIR.`,
 
 				Run: command.Adapt(runConnect),
 			},

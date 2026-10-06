@@ -28,10 +28,10 @@ import (
 	"github.com/creachadair/taskgroup"
 	"github.com/creachadair/tlsutil"
 	"github.com/goproxy/goproxy"
-	"github.com/tailscale/go-cache-plugin/lib/gobuild"
-	"github.com/tailscale/go-cache-plugin/lib/modproxy"
-	"github.com/tailscale/go-cache-plugin/lib/revproxy"
-	"github.com/tailscale/go-cache-plugin/lib/s3util"
+	"github.com/jpillora/go-cache-plugin/lib/gobuild"
+	"github.com/jpillora/go-cache-plugin/lib/modproxy"
+	"github.com/jpillora/go-cache-plugin/lib/revproxy"
+	"github.com/jpillora/go-cache-plugin/lib/s3util"
 	"tailscale.com/tsweb"
 )
 
@@ -267,8 +267,8 @@ func initServerCert(env *command.Env, hosts []string) (tls.Certificate, error) {
 }
 
 // makeHandler returns an HTTP handler that dispatches requests to debug
-// handlers or to the specified proxies, if they are defined.
-func makeHandler(modProxy, revProxy http.Handler) http.HandlerFunc {
+// handlers, the build cache, or the specified proxies, if they are defined.
+func makeHandler(buildCache, modProxy, revProxy http.Handler) http.HandlerFunc {
 	mux := http.NewServeMux()
 	tsweb.Debugger(mux)
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -286,6 +286,10 @@ func makeHandler(modProxy, revProxy http.Handler) http.HandlerFunc {
 		path := r.URL.Path
 		if strings.HasPrefix(path, "/debug/") {
 			mux.ServeHTTP(w, r)
+			return
+		}
+		if buildCache != nil && strings.HasPrefix(path, "/cache/") {
+			buildCache.ServeHTTP(w, r)
 			return
 		}
 		if modProxy != nil && r.Method == http.MethodGet && strings.HasPrefix(path, "/mod/") {

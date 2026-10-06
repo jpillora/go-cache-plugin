@@ -1,4 +1,4 @@
-module github.com/tailscale/go-cache-plugin
+module github.com/jpillora/go-cache-plugin
 
 go 1.26.1
 

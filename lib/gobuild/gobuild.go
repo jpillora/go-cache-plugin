@@ -22,7 +22,7 @@ import (
 	"github.com/creachadair/gocache"
 	"github.com/creachadair/gocache/cachedir"
 	"github.com/creachadair/taskgroup"
-	"github.com/tailscale/go-cache-plugin/lib/s3util"
+	"github.com/jpillora/go-cache-plugin/lib/s3util"
 )
 
 // S3Cache implements callbacks for a gocache.Server using an S3 bucket for
@@ -174,7 +174,7 @@ func (s *S3Cache) Put(ctx context.Context, obj gocache.Object) (diskPath string,
 		}
 
 		// Stage 2: Write the action record.
-		if err := s.S3Client.Put(ctx, s.actionKey(obj.ActionID),
+		if err := s.S3Client.Put(sctx, s.actionKey(obj.ActionID),
 			strings.NewReader(fmt.Sprintf("%s %d", obj.OutputID, mtime.UnixNano()))); err != nil {
 			gocache.Logf(ctx, "write action %s: %v", obj.ActionID, err)
 			return err

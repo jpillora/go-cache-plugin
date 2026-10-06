@@ -13,13 +13,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/creachadair/command"
 	"github.com/creachadair/gocache"
 	"github.com/creachadair/taskgroup"
+	"github.com/jpillora/go-cache-plugin/lib/remotecache"
 )
 
 var flags struct {
@@ -61,7 +64,7 @@ func runDirect(env *command.Env) error {
 }
 
 var serveFlags struct {
-	Plugin   int    `flag:"plugin,default=$GOCACHE_PLUGIN,Plugin service port (required)"`
+	Plugin   string `flag:"plugin,default=$GOCACHE_PLUGIN,Plugin service address (port or [host]:port; required)"`
 	HTTP     string `flag:"http,default=$GOCACHE_HTTP,HTTP service address ([host]:port)"`
 	ModProxy bool   `flag:"modproxy,default=$GOCACHE_MODPROXY,Enable a Go module proxy (requires --http)"`
 	RevProxy string `flag:"revproxy,default=$GOCACHE_REVPROXY,Reverse proxy these hosts (comma-separated; requires --http)"`
@@ -72,8 +75,9 @@ func noopClose(context.Context) error { return nil }
 
 // runServe runs a cache communicating over a local TCP socket.
 func runServe(env *command.Env) error {
-	if serveFlags.Plugin <= 0 {
-		return env.Usagef("you must provide a --plugin port")
+	addr, err := pluginAddress(serveFlags.Plugin)
+	if err != nil {
+		return env.Usagef("invalid --plugin address: %v", err)
 	}
 
 	// Initialize the cache server. Unlike a direct server, only close down and
@@ -86,7 +90,7 @@ func runServe(env *command.Env) error {
 	s.Close = noopClose
 
 	// Listen for connections from the Go toolchain on the specified socket.
-	lst, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", serveFlags.Plugin))
+	lst, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -122,7 +126,7 @@ func runServe(env *command.Env) error {
 	if serveFlags.HTTP != "" {
 		srv := &http.Server{
 			Addr:    serveFlags.HTTP,
-			Handler: makeHandler(modProxy, revProxy),
+			Handler: makeHandler(remotecache.NewHandler(s), modProxy, revProxy),
 		}
 		g.Go(srv.ListenAndServe)
 		vprintf("HTTP server listening at %q", serveFlags.HTTP)
@@ -163,9 +167,12 @@ func runServe(env *command.Env) error {
 
 // runConnect implements a direct cache proxy by connecting to a remote server.
 func runConnect(env *command.Env, plugin string) error {
+	if strings.HasPrefix(plugin, "http://") || strings.HasPrefix(plugin, "https://") {
+		return runHTTPConnect(env, plugin)
+	}
 	port, err := strconv.Atoi(plugin)
-	if err != nil {
-		return fmt.Errorf("invalid plugin port: %w", err)
+	if err != nil || port <= 0 || port > 65535 {
+		return env.Usagef("provide a local port or an http(s):// server URL")
 	}
 
 	conn, err := net.Dial("tcp", fmt.Sprintf(":%d", port))
@@ -186,6 +193,51 @@ func runConnect(env *command.Env, plugin string) error {
 	conn.Close()
 	vprintf("connection closed (%v elapsed)", time.Since(start))
 	return nil
+}
+
+// pluginAddress preserves localhost as the default for a bare port, while
+// allowing an explicit host to expose the listener on other interfaces.
+func pluginAddress(address string) (string, error) {
+	if !strings.Contains(address, ":") {
+		address = net.JoinHostPort("127.0.0.1", address)
+	}
+	_, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", err
+	}
+	number, err := strconv.Atoi(port)
+	if err != nil || number <= 0 || number > 65535 {
+		return "", fmt.Errorf("port must be between 1 and 65535")
+	}
+	return address, nil
+}
+
+// runHTTPConnect stages remote artifacts locally before returning paths to Go.
+// Unlike direct and serve modes, this mode needs no S3 configuration.
+func runHTTPConnect(env *command.Env, serverURL string) error {
+	cacheDir := flags.CacheDir
+	if cacheDir == "" {
+		base, err := os.UserCacheDir()
+		if err != nil {
+			return fmt.Errorf("find client cache directory: %w", err)
+		}
+		cacheDir = filepath.Join(base, "go-cache-plugin-client")
+	}
+	client, err := remotecache.NewClient(serverURL, cacheDir)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	client.Logf = vprintf
+	s := &gocache.Server{
+		Get:         client.Get,
+		Put:         client.Put,
+		Close:       noopClose,
+		MaxRequests: flags.Concurrency,
+		Logf:        vprintf,
+		LogRequests: flags.DebugLog&debugBuildCache != 0,
+	}
+	return s.Run(env.Context(), os.Stdin, os.Stdout)
 }
 
 // copy emulates the base case of io.Copy, but does not attempt to use the

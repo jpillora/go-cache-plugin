@@ -52,7 +52,7 @@ settings can be set via environment variables as well as flags.
    --------------------------------------------------------------------
    Flag (serve)         Variable                 Format      Default
    --------------------------------------------------------------------
-    --plugin            GOCACHE_PLUGIN           port        (required)
+    --plugin            GOCACHE_PLUGIN           port/host:port (required)
     --http              GOCACHE_HTTP             [host]:port ""
     --modproxy          GOCACHE_MODPROXY         bool        false
     --revproxy          GOCACHE_REVPROXY         host,...    ""
@@ -91,7 +91,16 @@ You can then use the "connect" subcommand to wire up the toolchain:
   export GOCACHEPROG="go-cache-plugin connect $PORT"
 
 In this mode, the server must have credentials to access to S3, but the
-toolchain process does not need AWS credentials.`,
+toolchain process does not need AWS credentials.
+
+For clients on other hosts, enable --http on the server and connect using its URL:
+
+  go-cache-plugin serve ... --plugin=0.0.0.0:5930 --http=0.0.0.0:5970
+  export GOCACHEPROG="go-cache-plugin connect http://server:5970"
+
+HTTP clients download cache artifacts into their own local cache directory,
+so they do not need the server's filesystem. Use a trusted network such as
+Tailscale. Override the client cache directory with --cache-dir or GOCACHE_DIR.`,
 	},
 	{
 		Name: "module-proxy",
