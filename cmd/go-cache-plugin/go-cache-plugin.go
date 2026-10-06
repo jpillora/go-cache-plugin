@@ -77,9 +77,13 @@ For a local port, this bridges stdin/stdout to the server's TCP listener.
 For an HTTP or HTTPS URL, this downloads artifacts to a client-local cache before
 returning file paths to Go. This requires no shared filesystem or S3 credentials.
 The client cache defaults to the OS cache directory under go-cache-plugin-client;
-override it with --cache-dir or GOCACHE_DIR.`,
+override it with --cache-dir or GOCACHE_DIR. It retains at most 2GiB using LFU
+eviction, configurable with --cache-size or GOCACHE_CLIENT_MAX_SIZE. Active builds
+pin their working files until they close; those files may temporarily exceed the
+persistent cache limit. Use --cache-size=0 to retain no persistent local cache.`,
 
-				Run: command.Adapt(runConnect),
+				SetFlags: command.Flags(flax.MustBind, &connectFlags),
+				Run:      command.Adapt(runConnect),
 			},
 			command.HelpCommand(helpTopics),
 			command.VersionCommand(),

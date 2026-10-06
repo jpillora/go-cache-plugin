@@ -7,7 +7,7 @@ This fork of
 [tailscale/go-cache-plugin](https://github.com/tailscale/go-cache-plugin)
 implements a `GOCACHEPROG` plugin backed by Amazon S3 or compatible services
 such as Cloudflare R2. It adds remote HTTP clients that download build artifacts
-into their own local cache, and configurable TCP bind addresses.
+into a bounded local LFU cache, and configurable TCP bind addresses.
 
 ## Installation
 
@@ -92,18 +92,35 @@ HTTPS URLs are also supported when the service is behind a TLS reverse proxy.
 
 Clients need no S3/R2 credentials, SSH tunnels, `socat`, or filesystem mounts.
 The client transfers binary artifacts over HTTP, verifies their SHA-256 output
-IDs, and returns paths in its own cache to Go. It checks that local cache first
-on subsequent builds. Upload failures leave usable local entries and are logged
-when `-v` is enabled; remote read failures are handled as cache lookup errors by
-Go.
+IDs, and returns build-pinned local paths to Go. It checks that local cache
+first on subsequent builds. Upload failures leave usable local entries and are
+logged when `-v` is enabled; remote read failures are handled as cache lookup
+errors by Go.
 
-The client cache defaults to `go-cache-plugin-client` under the OS cache
-directory (`~/.cache` on Linux and `~/Library/Caches` on macOS). Override it
-with `--cache-dir` or `GOCACHE_DIR`:
+The persistent client cache defaults to a **2 GiB LFU limit** under
+`go-cache-plugin-client` in the OS cache directory (`~/.cache` on Linux and
+`~/Library/Caches` on macOS). Frequency counters survive restarts; least
+recently used artifacts break frequency ties. Metadata counts toward the budget,
+with file sizes rounded to 4 KiB allocations. On overflow, eviction leaves 10%
+headroom.
+
+Each build pins its working files using hard links where supported, so eviction
+by another build cannot invalidate the paths Go is reading. These links are
+removed before acknowledging Go's close request. Active working files can
+temporarily exceed the persistent limit; pins left by a killed process are
+cleaned up on the next invocation. Artifacts larger than the budget are kept
+only for their current build.
+
+Change the limit with `--cache-size` or `GOCACHE_CLIENT_MAX_SIZE`, and the
+directory with `--cache-dir` or `GOCACHE_DIR`:
 
 ```sh
-export GOCACHEPROG="go-cache-plugin connect --cache-dir=$HOME/.cache/go-remote http://server:5970"
+export GOCACHEPROG="go-cache-plugin connect --cache-size=2GiB --cache-dir=$HOME/.cache/go-remote http://server:5970"
 ```
+
+`2GB` uses decimal bytes; `2GiB` uses binary bytes. `--cache-size=0` disables
+the persistent local cache and keeps only working files until the current build
+ends. Existing caches from v0.2.0 are trimmed to the new limit when opened.
 
 For local TCP clients, the original `connect 5930` interface is unchanged. A
 bare `--plugin=5930` still binds to localhost; use an explicit address to change

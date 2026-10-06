@@ -22,6 +22,7 @@ import (
 	"github.com/creachadair/command"
 	"github.com/creachadair/gocache"
 	"github.com/creachadair/taskgroup"
+	"github.com/jpillora/go-cache-plugin/lib/clientcache"
 	"github.com/jpillora/go-cache-plugin/lib/remotecache"
 )
 
@@ -69,6 +70,10 @@ var serveFlags struct {
 	ModProxy bool   `flag:"modproxy,default=$GOCACHE_MODPROXY,Enable a Go module proxy (requires --http)"`
 	RevProxy string `flag:"revproxy,default=$GOCACHE_REVPROXY,Reverse proxy these hosts (comma-separated; requires --http)"`
 	SumDB    string `flag:"sumdb,default=$GOCACHE_SUMDB,SumDB servers to proxy for (comma-separated)"`
+}
+
+var connectFlags struct {
+	CacheSize string `flag:"cache-size,default=$GOCACHE_CLIENT_MAX_SIZE,Client LFU cache limit (default 2GiB; 0 keeps only build working files)"`
 }
 
 func noopClose(context.Context) error { return nil }
@@ -223,7 +228,15 @@ func runHTTPConnect(env *command.Env, serverURL string) error {
 		}
 		cacheDir = filepath.Join(base, "go-cache-plugin-client")
 	}
-	client, err := remotecache.NewClient(serverURL, cacheDir)
+	limit := connectFlags.CacheSize
+	if limit == "" {
+		limit = "2GiB"
+	}
+	maxBytes, err := clientcache.ParseLimit(limit)
+	if err != nil {
+		return env.Usagef("invalid --cache-size: %v", err)
+	}
+	client, err := remotecache.NewClientWithLimit(serverURL, cacheDir, maxBytes)
 	if err != nil {
 		return err
 	}
@@ -232,7 +245,7 @@ func runHTTPConnect(env *command.Env, serverURL string) error {
 	s := &gocache.Server{
 		Get:         client.Get,
 		Put:         client.Put,
-		Close:       noopClose,
+		Close:       func(context.Context) error { return client.Close() },
 		MaxRequests: flags.Concurrency,
 		Logf:        vprintf,
 		LogRequests: flags.DebugLog&debugBuildCache != 0,

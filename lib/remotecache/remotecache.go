@@ -16,12 +16,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/creachadair/gocache"
-	"github.com/creachadair/gocache/cachedir"
+	"github.com/jpillora/go-cache-plugin/lib/clientcache"
 )
 
 const outputIDHeader = "X-Go-Cache-Output-ID"
@@ -107,7 +106,7 @@ func NewHandler(cache *gocache.Server) http.Handler {
 // cache backed by a remote HTTP server. It requires no S3 credentials.
 type Client struct {
 	baseURL *url.URL
-	local   *cachedir.Dir
+	local   *clientcache.Session
 	http    *http.Client
 
 	// Logf, if set, reports remote upload failures. A failed upload still leaves
@@ -118,6 +117,12 @@ type Client struct {
 // NewClient constructs a client with an absolute local cache directory. The URL
 // may include a base path, but must use HTTP or HTTPS with no query or fragment.
 func NewClient(serverURL, cacheDir string) (*Client, error) {
+	return NewClientWithLimit(serverURL, cacheDir, clientcache.DefaultLimit)
+}
+
+// NewClientWithLimit configures the persistent LFU cache budget. Active builds
+// hold their own pins, so their working files can temporarily exceed the budget.
+func NewClientWithLimit(serverURL, cacheDir string, limit int64) (*Client, error) {
 	base, err := url.Parse(serverURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse cache server URL: %w", err)
@@ -125,19 +130,18 @@ func NewClient(serverURL, cacheDir string) (*Client, error) {
 	if (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.RawQuery != "" || base.Fragment != "" {
 		return nil, errors.New("cache server URL must be http(s)://host[:port][/path] with no query or fragment")
 	}
-	absDir, err := filepath.Abs(cacheDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve client cache directory: %w", err)
-	}
-	local, err := cachedir.New(absDir)
+	local, err := clientcache.New(cacheDir, limit)
 	if err != nil {
 		return nil, fmt.Errorf("create client cache: %w", err)
 	}
 	return &Client{baseURL: base, local: local, http: &http.Client{Timeout: time.Minute}}, nil
 }
 
-// Close releases idle HTTP connections.
-func (c *Client) Close() { c.http.CloseIdleConnections() }
+// Close releases HTTP connections and the artifacts pinned by this build.
+func (c *Client) Close() error {
+	c.http.CloseIdleConnections()
+	return c.local.Close()
+}
 
 // Get checks the local cache first, then downloads a remote hit into the local
 // directory before returning its path. A remote 404 is an ordinary cache miss.

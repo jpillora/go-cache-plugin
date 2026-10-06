@@ -100,7 +100,11 @@ For clients on other hosts, enable --http on the server and connect using its UR
 
 HTTP clients download cache artifacts into their own local cache directory,
 so they do not need the server's filesystem. Use a trusted network such as
-Tailscale. Override the client cache directory with --cache-dir or GOCACHE_DIR.`,
+Tailscale. Override the client cache directory with --cache-dir or GOCACHE_DIR.
+The persistent client cache defaults to a 2GiB LFU limit. Change it with
+--cache-size or GOCACHE_CLIENT_MAX_SIZE. Active builds pin files until they finish,
+so their working sets may temporarily exceed that limit. Use --cache-size=0 to
+keep only the current build's working files.`,
 	},
 	{
 		Name: "module-proxy",

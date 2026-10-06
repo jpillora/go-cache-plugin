@@ -38,7 +38,11 @@ func newClient(t *testing.T, serverURL, directory string) *Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(client.Close)
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return client
 }
 

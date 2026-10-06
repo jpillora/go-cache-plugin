@@ -15,6 +15,7 @@ require (
 	github.com/creachadair/scheddle v0.0.0-20260418161627-87a4a0c853c4
 	github.com/creachadair/taskgroup v0.14.4
 	github.com/creachadair/tlsutil v0.0.0-20260218173745-49b0059fedaf
+	github.com/gofrs/flock v0.12.1
 	github.com/goproxy/goproxy v0.21.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/sys v0.40.0

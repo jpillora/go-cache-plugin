@@ -86,7 +86,7 @@ func TestRemoteGoBuild(t *testing.T) {
 	}
 	for i := range 2 {
 		clientDir := t.TempDir()
-		pluginCommand := strconv.Quote(os.Args[0]) + " -test.run=^TestCachePluginProcess$ -- connect " + strconv.Quote("--cache-dir="+clientDir) + " " + server.URL
+		pluginCommand := strconv.Quote(os.Args[0]) + " -test.run=^TestCachePluginProcess$ -- connect --cache-size=64KiB " + strconv.Quote("--cache-dir="+clientDir) + " " + server.URL
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		build := exec.CommandContext(ctx, "go", "build", "-o", "app", ".")
 		build.Dir = project
@@ -112,9 +112,36 @@ func TestRemoteGoBuild(t *testing.T) {
 		if err != nil || len(entries) == 0 {
 			t.Fatalf("client %d did not stage its own artifacts: %v", i+1, err)
 		}
+		builds, err := os.ReadDir(filepath.Join(clientDir, "builds"))
+		if err != nil || len(builds) != 0 {
+			t.Fatalf("client %d left active-build files after Go closed it: %v, %v", i+1, builds, err)
+		}
+		data, err := os.ReadFile(filepath.Join(clientDir, ".size"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		retained, err := strconv.ParseInt(string(data), 10, 64)
+		if err != nil || retained > 64<<10 {
+			t.Fatalf("client %d exceeded its 64 KiB limit: %d, %v", i+1, retained, err)
+		}
 		result, err = exec.CommandContext(t.Context(), filepath.Join(project, "app")).CombinedOutput()
 		if err != nil || strings.TrimSpace(string(result)) != "remote cache OK" {
 			t.Fatalf("client %d executable: %v, %q", i+1, err, result)
+		}
+		if i == 1 {
+			if err := os.WriteFile(filepath.Join(project, "main.go"), []byte("package main\nfunc main() { missingFunction() }\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			failed := exec.CommandContext(t.Context(), "go", "build", ".")
+			failed.Dir, failed.Env = project, build.Env
+			result, err := failed.CombinedOutput()
+			if err == nil || !strings.Contains(string(result), "undefined: missingFunction") {
+				t.Fatalf("expected failed compilation: %v, %s", err, result)
+			}
+			builds, err := os.ReadDir(filepath.Join(clientDir, "builds"))
+			if err != nil || len(builds) != 0 {
+				t.Fatalf("failed build left working files: %v, %v", builds, err)
+			}
 		}
 	}
 }
