@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
@@ -15,7 +16,13 @@ import (
 	"github.com/jpillora/go-cache-plugin/lib/s3util"
 )
 
+var version string = "0.0.0-src"
+
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(version)
+		return
+	}
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 	root := &command.C{
 		Name:  command.ProgramName(),

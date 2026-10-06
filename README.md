@@ -11,9 +11,15 @@ into a bounded local LFU cache, and configurable TCP bind addresses.
 
 ## Installation
 
+Download a prebuilt binary from the
+[latest GitHub release](https://github.com/jpillora/go-cache-plugin/releases/latest),
+or install from source:
+
 ```shell
 go install github.com/jpillora/go-cache-plugin/cmd/go-cache-plugin@latest
 ```
+
+Run `go-cache-plugin --version` to print the binary's version.
 
 ## Usage Outline
 
@@ -151,6 +157,15 @@ If you want to also proxy queries to `sum.golang.org`, also add:
 ```sh
 export GOSUMDB='sum.golang.org http://locahost:5970/mod/sumdb/sum.golang.org'
 ```
+
+## Releases
+
+Pushing a `v*` tag runs tests and GoReleaser using the latest stable Go
+toolchain. The release configuration follows
+[jpillora/go-template](https://github.com/jpillora/go-template/tree/jpillora):
+single-file gzip binaries for Linux, macOS, Windows, and OpenBSD, plus
+checksums. GoReleaser sets `main.version` from the tag; source builds default to
+`0.0.0-src`.
 
 ## References
 
