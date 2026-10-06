@@ -17,8 +17,8 @@ require (
 	github.com/creachadair/tlsutil v0.0.0-20260218173745-49b0059fedaf
 	github.com/gofrs/flock v0.12.1
 	github.com/goproxy/goproxy v0.21.0
-	golang.org/x/sync v0.19.0
-	golang.org/x/sys v0.40.0
+	golang.org/x/sync v0.20.0
+	golang.org/x/sys v0.43.0
 	tailscale.com v1.96.5
 )
 
@@ -40,15 +40,15 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.42.0 // indirect
 	github.com/aws/smithy-go v1.25.0 // indirect
 	github.com/creachadair/msync v0.8.1 // indirect
-	github.com/go-json-experiment/json v0.0.0-20250813024750-ebf49471dced // indirect
+	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/exp/typeparams v0.0.0-20240314144324-c7f7c6466f7f // indirect
-	golang.org/x/mod v0.31.0 // indirect
-	golang.org/x/tools v0.40.1-0.20260108161641-ca281cf95054 // indirect
-	honnef.co/go/tools v0.7.0 // indirect
+	golang.org/x/mod v0.35.0 // indirect
+	golang.org/x/tools v0.44.1-0.20260420230617-19499e7caabc // indirect
+	honnef.co/go/tools v0.8.1 // indirect
 )
 
 retract (

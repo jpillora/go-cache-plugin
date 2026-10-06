@@ -12,7 +12,7 @@ into a bounded local LFU cache, and configurable TCP bind addresses.
 ## Installation
 
 ```shell
-GOTOOLCHAIN=go1.26.5 go install github.com/jpillora/go-cache-plugin/cmd/go-cache-plugin@latest
+go install github.com/jpillora/go-cache-plugin/cmd/go-cache-plugin@latest
 ```
 
 ## Usage Outline
@@ -23,8 +23,7 @@ go test ./...
 ```
 
 Go 1.24 and later support `GOCACHEPROG` by default. Earlier toolchains require
-`GOEXPERIMENT=cacheprog`. Build this binary with Go 1.26.x; the current upstream
-dependencies are incompatible with Go 1.27.
+`GOEXPERIMENT=cacheprog`.
 
 ## Discussion
 
@@ -81,7 +80,7 @@ go-cache-plugin serve \
 On each client, install this fork and point `GOCACHEPROG` at the HTTP endpoint:
 
 ```sh
-GOTOOLCHAIN=go1.26.5 go install github.com/jpillora/go-cache-plugin/cmd/go-cache-plugin@latest
+go install github.com/jpillora/go-cache-plugin/cmd/go-cache-plugin@latest
 export GOCACHEPROG="go-cache-plugin connect http://server:5970"
 go build ./...
 ```
