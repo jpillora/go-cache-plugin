@@ -59,6 +59,15 @@ go-cache-plugin serve \
    --bucket=some-s3-bucket
 ```
 
+Bound server-local storage with `--local-cache-size=4GiB` or
+`GOCACHE_LOCAL_MAX_SIZE=4GiB`. The limit covers persistent artifacts and metadata,
+using LFU eviction. Omit the option for the previous unlimited behavior; `0`
+retains only active working files. Startup trims existing caches to the limit.
+TCP builds and HTTP requests hold independent pins, and background uploads keep
+open file handles, so eviction cannot invalidate in-use files. These active files
+can temporarily exceed the persistent limit. Do not combine it with `--expiry`,
+which performs age-based cleanup only at shutdown.
+
 To connect to a server running in this mode, use the `connect` subcommand:
 
 ```sh

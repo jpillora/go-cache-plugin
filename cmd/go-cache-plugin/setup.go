@@ -28,6 +28,7 @@ import (
 	"github.com/creachadair/taskgroup"
 	"github.com/creachadair/tlsutil"
 	"github.com/goproxy/goproxy"
+	"github.com/jpillora/go-cache-plugin/lib/clientcache"
 	"github.com/jpillora/go-cache-plugin/lib/gobuild"
 	"github.com/jpillora/go-cache-plugin/lib/modproxy"
 	"github.com/jpillora/go-cache-plugin/lib/revproxy"
@@ -35,12 +36,23 @@ import (
 	"tailscale.com/tsweb"
 )
 
-func initCacheServer(env *command.Env) (*gocache.Server, *s3util.Client, error) {
+func initCacheServer(env *command.Env) (*cacheServer, *s3util.Client, error) {
 	switch {
 	case flags.CacheDir == "":
 		return nil, nil, env.Usagef("you must provide a --cache-dir")
 	case flags.S3Bucket == "":
 		return nil, nil, env.Usagef("you must provide an S3 --bucket name")
+	}
+	var limit int64
+	var err error
+	if flags.LocalCacheSize != "" {
+		if flags.Expiration > 0 {
+			return nil, nil, env.Usagef("--expiry cannot be combined with --local-cache-size")
+		}
+		limit, err = clientcache.ParseLimit(flags.LocalCacheSize)
+		if err != nil {
+			return nil, nil, env.Usagef("invalid --local-cache-size: %v", err)
+		}
 	}
 	region, err := getBucketRegion(env.Context(), flags.S3Bucket)
 	if err != nil {
@@ -80,9 +92,22 @@ func initCacheServer(env *command.Env) (*gocache.Server, *s3util.Client, error) 
 		MinUploadSize:     flags.MinUploadSize,
 		UploadConcurrency: flags.S3Concurrency,
 	}
+	var bounded *boundedLocal
+	if flags.LocalCacheSize != "" {
+		local, err := clientcache.New(flags.CacheDir, limit)
+		if err != nil {
+			return nil, nil, fmt.Errorf("open bounded local cache: %w", err)
+		}
+		bounded = &boundedLocal{root: local}
+		expvar.NewInt("gocache_local_limit_bytes").Set(limit)
+		cache.Local = bounded
+	}
 	cache.SetMetrics(env.Context(), expvar.NewMap("gocache_host"))
 
 	close := cache.Close
+	if bounded != nil {
+		close = func(ctx context.Context) error { return errors.Join(cache.Close(ctx), bounded.root.Close()) }
+	}
 	if flags.Expiration > 0 {
 		dirClose := dir.Cleanup(flags.Expiration)
 		close = func(ctx context.Context) error {
@@ -99,7 +124,7 @@ func initCacheServer(env *command.Env) (*gocache.Server, *s3util.Client, error) 
 		LogRequests: flags.DebugLog&debugBuildCache != 0,
 	}
 	expvar.Publish("gocache_server", s.Metrics().Get("server"))
-	return s, client, nil
+	return &cacheServer{Server: s, local: bounded}, client, nil
 }
 
 // initModProxy initializes a Go module proxy if one is enabled. If not, it

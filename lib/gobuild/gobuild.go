@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/creachadair/gocache"
-	"github.com/creachadair/gocache/cachedir"
 	"github.com/creachadair/taskgroup"
 	"github.com/jpillora/go-cache-plugin/lib/s3util"
 )
@@ -53,7 +52,10 @@ type S3Cache struct {
 	// It must be non-nil. A local stage is required because the Go toolchain
 	// needs direct access to read the files reported by the cache.
 	// It is safe to use a tmpfs directory.
-	Local *cachedir.Dir
+	Local interface {
+		Get(context.Context, string) (string, string, error)
+		Put(context.Context, gocache.Object) (string, error)
+	}
 
 	// S3Client is the S3 client used to read and write cache entries to the
 	// backing store. It must be non-nil.
@@ -160,15 +162,22 @@ func (s *S3Cache) Put(ctx context.Context, obj gocache.Object) (diskPath string,
 		return diskPath, nil // don't bother uploading this, it's too small
 	}
 
+	// Open before returning the path: a bounded cache may release the build's
+	// pin while this asynchronous upload is still queued or running.
+	file, err := os.Open(diskPath)
+	if err != nil {
+		return "", err
+	}
 	// Try to push the record to S3 in the background.
 	s.start(func() error {
+		defer file.Close()
 		// Override the context with a separate timeout in case S3 is farkakte.
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 1*time.Minute)
 		defer cancel()
 
 		// Stage 1: Maybe write the object. Do this before writing the action
 		// record so we are less likely to get a spurious miss later.
-		mtime, err := s.maybePutObject(sctx, obj.OutputID, diskPath, etr.ETag())
+		mtime, err := s.maybePutObject(sctx, obj.OutputID, file, etr.ETag())
 		if err != nil {
 			return err
 		}
@@ -212,13 +221,7 @@ func (s *S3Cache) SetMetrics(_ context.Context, m *expvar.Map) {
 // maybePutObject writes the specified object contents to S3 if there is not
 // already a matching key with the same etag. It returns the modified time of
 // the object file, whether or not it was sent to S3.
-func (s *S3Cache) maybePutObject(ctx context.Context, outputID, diskPath, etag string) (time.Time, error) {
-	f, err := os.Open(diskPath)
-	if err != nil {
-		gocache.Logf(ctx, "[s3] open local object %s: %v", outputID, err)
-		return time.Time{}, err
-	}
-	defer f.Close()
+func (s *S3Cache) maybePutObject(ctx context.Context, outputID string, f *os.File, etag string) (time.Time, error) {
 	fi, err := f.Stat()
 	if err != nil {
 		return time.Time{}, err

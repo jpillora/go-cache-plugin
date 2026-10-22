@@ -27,19 +27,20 @@ import (
 )
 
 var flags struct {
-	CacheDir      string        `flag:"cache-dir,default=$GOCACHE_DIR,Local cache directory (required)"`
-	S3Bucket      string        `flag:"bucket,default=$GOCACHE_S3_BUCKET,S3 bucket name (required)"`
-	S3Region      string        `flag:"region,default=$GOCACHE_S3_REGION,S3 region"`
-	S3Endpoint    string        `flag:"s3-endpoint-url,default=$GOCACHE_S3_ENDPOINT_URL,S3 custom endpoint URL (if unset, use AWS default)"`
-	S3PathStyle   bool          `flag:"s3-path-style,default=$GOCACHE_S3_PATH_STYLE,S3 path-style URLs (optional)"`
-	KeyPrefix     string        `flag:"prefix,default=$GOCACHE_KEY_PREFIX,S3 key prefix (optional)"`
-	MinUploadSize int64         `flag:"min-upload-size,default=$GOCACHE_MIN_SIZE,Minimum object size to upload to S3 (in bytes)"`
-	Concurrency   int           `flag:"c,default=$GOCACHE_CONCURRENCY,Maximum number of concurrent requests"`
-	S3Concurrency int           `flag:"u,default=$GOCACHE_S3_CONCURRENCY,Maximum concurrency for upload to S3"`
-	PrintMetrics  bool          `flag:"metrics,default=$GOCACHE_METRICS,Print summary metrics to stderr at exit"`
-	Expiration    time.Duration `flag:"expiry,default=$GOCACHE_EXPIRY,Cache expiration period (optional)"`
-	Verbose       bool          `flag:"v,default=$GOCACHE_VERBOSE,Enable verbose logging"`
-	DebugLog      int           `flag:"debug,default=$GOCACHE_DEBUG,Enable detailed per-request debug logging (noisy)"`
+	LocalCacheSize string        `flag:"local-cache-size,default=$GOCACHE_LOCAL_MAX_SIZE,Server local LFU cache limit (optional; 0 retains only active files)"`
+	CacheDir       string        `flag:"cache-dir,default=$GOCACHE_DIR,Local cache directory (required)"`
+	S3Bucket       string        `flag:"bucket,default=$GOCACHE_S3_BUCKET,S3 bucket name (required)"`
+	S3Region       string        `flag:"region,default=$GOCACHE_S3_REGION,S3 region"`
+	S3Endpoint     string        `flag:"s3-endpoint-url,default=$GOCACHE_S3_ENDPOINT_URL,S3 custom endpoint URL (if unset, use AWS default)"`
+	S3PathStyle    bool          `flag:"s3-path-style,default=$GOCACHE_S3_PATH_STYLE,S3 path-style URLs (optional)"`
+	KeyPrefix      string        `flag:"prefix,default=$GOCACHE_KEY_PREFIX,S3 key prefix (optional)"`
+	MinUploadSize  int64         `flag:"min-upload-size,default=$GOCACHE_MIN_SIZE,Minimum object size to upload to S3 (in bytes)"`
+	Concurrency    int           `flag:"c,default=$GOCACHE_CONCURRENCY,Maximum number of concurrent requests"`
+	S3Concurrency  int           `flag:"u,default=$GOCACHE_S3_CONCURRENCY,Maximum concurrency for upload to S3"`
+	PrintMetrics   bool          `flag:"metrics,default=$GOCACHE_METRICS,Print summary metrics to stderr at exit"`
+	Expiration     time.Duration `flag:"expiry,default=$GOCACHE_EXPIRY,Cache expiration period (optional)"`
+	Verbose        bool          `flag:"v,default=$GOCACHE_VERBOSE,Enable verbose logging"`
+	DebugLog       int           `flag:"debug,default=$GOCACHE_DEBUG,Enable detailed per-request debug logging (noisy)"`
 }
 
 const (
@@ -55,7 +56,12 @@ func runDirect(env *command.Env) error {
 	if err != nil {
 		return err
 	}
-	if err := s.Run(env.Context(), os.Stdin, os.Stdout); err != nil {
+	ctx, release, err := s.session(env.Context())
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := s.Run(ctx, os.Stdin, os.Stdout); err != nil {
 		return fmt.Errorf("cache server exited with error: %w", err)
 	}
 	if flags.Verbose || flags.PrintMetrics {
@@ -131,7 +137,7 @@ func runServe(env *command.Env) error {
 	if serveFlags.HTTP != "" {
 		srv := &http.Server{
 			Addr:    serveFlags.HTTP,
-			Handler: makeHandler(remotecache.NewHandler(s), modProxy, revProxy),
+			Handler: makeHandler(s.handler(remotecache.NewHandler(s.Server)), modProxy, revProxy),
 		}
 		g.Go(srv.ListenAndServe)
 		vprintf("HTTP server listening at %q", serveFlags.HTTP)
@@ -156,7 +162,12 @@ func runServe(env *command.Env) error {
 				log.Printf("client connection closed")
 				conn.Close()
 			}()
-			return s.Run(ctx, conn, conn)
+			buildCtx, release, err := s.session(ctx)
+			if err != nil {
+				return err
+			}
+			defer release()
+			return s.Run(buildCtx, conn, conn)
 		})
 	}
 	log.Printf("server loop exited, waiting for client exit")

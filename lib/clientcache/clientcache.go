@@ -86,26 +86,47 @@ func New(directory string, limit int64) (*Session, error) {
 		if err := s.resize(bytes); err != nil {
 			return err
 		}
-		builds := filepath.Join(absDir, "builds")
-		if err := os.MkdirAll(builds, 0700); err != nil {
-			return err
-		}
-		s.buildDir, err = os.MkdirTemp(builds, "build-")
-		if err != nil {
-			return err
-		}
-		s.buildLock = flock.New(filepath.Join(s.buildDir, ".lock"))
-		if err := s.buildLock.Lock(); err != nil {
-			return err
-		}
-		s.staging, err = cachedir.New(s.buildDir)
-		return err
+		return s.createBuild()
 	})
 	if err != nil {
 		s.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+// NewSession opens an independent build against the same initialized cache.
+// Unlike New it does not rescan the shared cache on every HTTP request.
+func (s *Session) NewSession() (*Session, error) {
+	s.operations.RLock()
+	defer s.operations.RUnlock()
+	if s.closed {
+		return nil, errors.New("client cache is closed")
+	}
+	child := &Session{directory: s.directory, limit: s.limit, persistent: s.persistent, cacheLock: flock.New(filepath.Join(s.directory, ".cache.lock"))}
+	if err := child.locked(child.createBuild); err != nil {
+		child.Close()
+		return nil, err
+	}
+	return child, nil
+}
+
+func (s *Session) createBuild() error {
+	builds := filepath.Join(s.directory, "builds")
+	if err := os.MkdirAll(builds, 0700); err != nil {
+		return err
+	}
+	var err error
+	s.buildDir, err = os.MkdirTemp(builds, "build-")
+	if err != nil {
+		return err
+	}
+	s.buildLock = flock.New(filepath.Join(s.buildDir, ".lock"))
+	if err := s.buildLock.Lock(); err != nil {
+		return err
+	}
+	s.staging, err = cachedir.New(s.buildDir)
+	return err
 }
 
 // Get returns a build-pinned path and records one use of the output artifact.

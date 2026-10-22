@@ -35,6 +35,7 @@ settings can be set via environment variables as well as flags.
    --------------------------------------------------------------------
    Flag (global)        Variable                 Format      Default
    --------------------------------------------------------------------
+    --local-cache-size  GOCACHE_LOCAL_MAX_SIZE   size        unlimited
     --cache-dir         GOCACHE_DIR              path        (required)
     --bucket            GOCACHE_S3_BUCKET        string      (required)
     --region            GOCACHE_S3_REGION        string      based on bucket
