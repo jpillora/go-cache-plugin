@@ -17,14 +17,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        go-version: ['stable']
         os: ['ubuntu-latest']
     steps:
     - uses: actions/checkout@v7
-    - name: Install Go ${{ matrix.go-version }}
+    - name: Install Go from go.mod
       uses: actions/setup-go@v6
       with:
-        go-version: ${{ matrix.go-version }}
+        go-version-file: go.mod
     - uses: creachadair/go-presubmit-action@v2
       with:
         check-staticcheck: 'no'
