@@ -26,3 +26,7 @@ jobs:
       with:
         go-version: ${{ matrix.go-version }}
     - uses: creachadair/go-presubmit-action@v2
+      with:
+        check-staticcheck: 'no'
+    - name: Run module-pinned Staticcheck
+      run: go tool staticcheck ./...
