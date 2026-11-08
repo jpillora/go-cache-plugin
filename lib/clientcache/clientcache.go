@@ -166,6 +166,10 @@ func (s *Session) Get(ctx context.Context, actionID string) (output, path string
 		}
 		return s.touchIfPresent(output)
 	})
+	if IsCapacityError(err) && output != "" && path != "" {
+		// Updating LFU metadata is optional once a usable build pin exists.
+		err = nil
+	}
 	return output, path, err
 }
 
@@ -182,6 +186,10 @@ func (s *Session) Put(ctx context.Context, object gocache.Object) (string, error
 	}
 	path, err := s.staging.Put(ctx, object)
 	if err != nil {
+		if IsCapacityError(err) && path != "" {
+			// The artifact was committed, but its action metadata did not fit.
+			return path, nil
+		}
 		return "", err
 	}
 	if s.limit == 0 || allocated(object.Size) > s.limit {
@@ -213,6 +221,10 @@ func (s *Session) Put(ctx context.Context, object gocache.Object) (string, error
 		}
 		return s.account(after - before)
 	})
+	if IsCapacityError(err) {
+		// Retaining an LFU copy is optional; Go can use its existing build pin.
+		err = nil
+	}
 	return path, err
 }
 
@@ -227,7 +239,8 @@ func (s *Session) Close() error {
 	s.closed = true
 	var err error
 	if s.buildDir != "" {
-		err = s.locked(func() error { return os.RemoveAll(s.buildDir) })
+		// Free pins even when there is no space to create an accounting marker.
+		err = s.withCacheLock(func() error { return os.RemoveAll(s.buildDir) })
 	}
 	if s.buildLock != nil {
 		err = errors.Join(err, s.buildLock.Close())
@@ -236,12 +249,16 @@ func (s *Session) Close() error {
 }
 
 func (s *Session) locked(fn func() error) error {
+	return s.withCacheLock(func() error { return s.transaction(fn) })
+}
+
+func (s *Session) withCacheLock(fn func() error) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	if err := s.cacheLock.Lock(); err != nil {
 		return err
 	}
-	err := s.transaction(fn)
+	err := fn()
 	return errors.Join(err, s.cacheLock.Unlock())
 }
 

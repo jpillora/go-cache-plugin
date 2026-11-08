@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"syscall"
 
 	"github.com/creachadair/gocache"
 	"github.com/jpillora/go-cache-plugin/lib/clientcache"
@@ -24,6 +25,9 @@ func (b *boundedLocal) Get(ctx context.Context, action string) (string, string, 
 	if !ok {
 		return "", "", errors.New("missing local cache session")
 	}
+	if session == nil {
+		return "", "", syscall.ENOSPC
+	}
 	return session.Get(ctx, action)
 }
 
@@ -31,6 +35,9 @@ func (b *boundedLocal) Put(ctx context.Context, object gocache.Object) (string, 
 	session, ok := ctx.Value(localSessionKey{}).(*clientcache.Session)
 	if !ok {
 		return "", errors.New("missing local cache session")
+	}
+	if session == nil {
+		return "", syscall.ENOSPC
 	}
 	return session.Put(ctx, object)
 }
@@ -46,6 +53,11 @@ func (s *cacheServer) session(ctx context.Context) (context.Context, func(), err
 	}
 	session, err := s.local.root.NewSession()
 	if err != nil {
+		if clientcache.IsCapacityError(err) {
+			// Keep serving the protocol when a full RAM cache cannot open a
+			// session. Gets become misses; puts report that staging is full.
+			return context.WithValue(ctx, localSessionKey{}, (*clientcache.Session)(nil)), func() {}, nil
+		}
 		return nil, nil, err
 	}
 	return context.WithValue(ctx, localSessionKey{}, session), func() {

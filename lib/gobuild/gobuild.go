@@ -21,6 +21,7 @@ import (
 
 	"github.com/creachadair/gocache"
 	"github.com/creachadair/taskgroup"
+	"github.com/jpillora/go-cache-plugin/lib/clientcache"
 	"github.com/jpillora/go-cache-plugin/lib/s3util"
 )
 
@@ -104,6 +105,9 @@ func (s *S3Cache) Get(ctx context.Context, actionID string) (outputID, diskPath 
 		s.getLocalHit.Add(1)
 		return objID, diskPath, nil // cache hit, OK
 	}
+	if clientcache.IsCapacityError(err) {
+		return "", "", nil // no room for a build pin; let Go compile instead
+	}
 
 	// Reaching here, either we got a cache miss or an error reading from local.
 	// Try reading the action from S3.
@@ -129,8 +133,6 @@ func (s *S3Cache) Get(ctx context.Context, actionID string) (outputID, diskPath 
 		return "", "", fmt.Errorf("[s3] read object %s: %w", outputID, err)
 	}
 	defer object.Close()
-	s.getFaultHit.Add(1)
-
 	// Now we should have the body; poke it into the local cache.  Preserve the
 	// modification timestamp recorded with the original action.
 	diskPath, err = s.Local.Put(ctx, gocache.Object{
@@ -140,6 +142,12 @@ func (s *S3Cache) Get(ctx context.Context, actionID string) (outputID, diskPath 
 		Body:     object,
 		ModTime:  mtime,
 	})
+	if clientcache.IsCapacityError(err) {
+		return "", "", nil // the remote hit could not be staged locally
+	}
+	if err == nil {
+		s.getFaultHit.Add(1)
+	}
 	return outputID, diskPath, err
 }
 

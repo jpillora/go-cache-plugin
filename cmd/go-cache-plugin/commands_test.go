@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -18,8 +19,73 @@ import (
 
 	"github.com/creachadair/gocache"
 	"github.com/creachadair/gocache/cachedir"
+	"github.com/jpillora/go-cache-plugin/lib/clientcache"
 	"github.com/jpillora/go-cache-plugin/lib/remotecache"
 )
+
+func TestGoBuildWithoutRetention(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the Go toolchain with no retained cache")
+	}
+	store, err := clientcache.New(t.TempDir(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	var puts atomic.Int64
+	server := &gocache.Server{
+		Get: store.Get,
+		Put: func(ctx context.Context, object gocache.Object) (string, error) {
+			puts.Add(1)
+			return store.Put(ctx, object)
+		},
+		Close: func(context.Context) error { return store.Close() },
+	}
+	served := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			served <- err
+			return
+		}
+		defer conn.Close()
+		served <- server.Run(t.Context(), conn, conn)
+	}()
+	project := t.TempDir()
+	for name, contents := range map[string]string{
+		"go.mod":  "module example.com/full-cache-test\n\ngo 1.26.1\n",
+		"main.go": "package main\nfunc main() { println(\"full cache OK\") }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(project, name), []byte(contents), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+	plugin := strconv.Quote(os.Args[0]) + " -test.run=^TestCachePluginProcess$ -- connect " + port
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	build := exec.CommandContext(ctx, "go", "build", "-p=2", "-o", "app", ".")
+	build.Dir = project
+	build.Env = append(os.Environ(), "GOCACHEPROG="+plugin, "GO_CACHE_PLUGIN_TEST_PROCESS=1", "GOCACHE="+t.TempDir())
+	if result, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build with no retained cache: %v\n%s", err, result)
+	}
+	if puts.Load() == 0 {
+		t.Fatal("build did not create working artifacts")
+	}
+	if err := <-served; err != nil {
+		t.Fatal(err)
+	}
+	result, err := exec.CommandContext(ctx, filepath.Join(project, "app")).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(result)) != "full cache OK" {
+		t.Fatalf("executable: %v, %q", err, result)
+	}
+}
 
 func TestPluginAddress(t *testing.T) {
 	for _, test := range []struct{ input, want string }{

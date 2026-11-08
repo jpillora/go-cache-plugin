@@ -6,6 +6,7 @@ package gobuild
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,6 +25,58 @@ import (
 	"github.com/creachadair/taskgroup"
 	"github.com/jpillora/go-cache-plugin/lib/s3util"
 )
+
+type failingLocal struct{ getErr, putErr error }
+
+func (f failingLocal) Get(context.Context, string) (string, string, error) {
+	return "", "", f.getErr
+}
+
+func (f failingLocal) Put(context.Context, gocache.Object) (string, error) {
+	return "", f.putErr
+}
+
+func TestFullLocalCacheIsAMiss(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		local    failingLocal
+		requests int64
+		wantErr  error
+	}{
+		{"session full", failingLocal{getErr: syscall.ENOSPC}, 0, nil},
+		{"staging full", failingLocal{putErr: fmt.Errorf("write: %w", syscall.ENOSPC)}, 2, nil},
+		{"quota exhausted", failingLocal{putErr: syscall.EDQUOT}, 2, nil},
+		{"permissions remain errors", failingLocal{putErr: os.ErrPermission}, 2, os.ErrPermission},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var requests atomic.Int64
+			data := "remote artifact"
+			output := fmt.Sprintf("%x", sha256.Sum256([]byte(data)))
+			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				if strings.Contains(r.URL.Path, "/action/") {
+					fmt.Fprintf(w, "%s %d", output, time.Now().UnixNano())
+				} else {
+					io.WriteString(w, data)
+				}
+			}))
+			defer remote.Close()
+			cache := &S3Cache{Local: test.local, S3Client: &s3util.Client{
+				Client: s3.New(s3.Options{Region: "test", BaseEndpoint: aws.String(remote.URL), UsePathStyle: true, Credentials: aws.AnonymousCredentials{}}), Bucket: "test",
+			}}
+			id, path, err := cache.Get(t.Context(), output)
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("Get error = %v, want %v", err, test.wantErr)
+			}
+			if test.wantErr == nil && (id != "" || path != "") {
+				t.Fatalf("full cache returned a hit: %q, %q", id, path)
+			}
+			if got := requests.Load(); got != test.requests {
+				t.Fatalf("S3 requests = %d, want %d", got, test.requests)
+			}
+		})
+	}
+}
 
 func TestUploadSurvivesRequestCancellation(t *testing.T) {
 	objectStarted := make(chan struct{})

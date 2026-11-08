@@ -68,6 +68,23 @@ open file handles, so eviction cannot invalidate in-use files. These active file
 can temporarily exceed the persistent limit. Do not combine it with `--expiry`,
 which performs age-based cleanup only at shutdown.
 
+Go requires readable artifact filenames even when R2 is the backing store. For
+a memory-only server cache on Linux, put `--cache-dir` on a shared tmpfs (for
+example `/run/gocache/server`) and set `--local-cache-size=512MiB`. Bound the tmpfs
+itself as well, for example to 2 GiB, because active build pins and uploads are
+not evictable. Mount it with `noswap` on Linux 6.4+ to prevent cache data from
+spilling into swap. Both the server and local TCP clients must see this mount;
+a filesystem private to the server's mount namespace will not work.
+
+Exhausted staging space or quota turns cache lookups into misses. Optional LFU
+metadata/retention failures do not invalidate an existing build pin, and build
+cleanup does not require another accounting write. The LFU can be disabled with
+`--local-cache-size=0`, but the toolchain still needs temporary artifact files:
+completely exhausting the RAM filesystem can break builds, including package
+discovery and `go list -export`. Leave working-space headroom above the LFU
+budget. This does not move Go's own working directories or downloaded modules
+into memory.
+
 To connect to a server running in this mode, use the `connect` subcommand:
 
 ```sh

@@ -179,6 +179,9 @@ func (c *Client) Get(ctx context.Context, actionID string) (string, string, erro
 		ModTime:  mtime,
 	})
 	if err != nil {
+		if clientcache.IsCapacityError(err) {
+			return "", "", nil
+		}
 		return "", "", fmt.Errorf("stage remote artifact: %w", err)
 	}
 	return output, path, nil
